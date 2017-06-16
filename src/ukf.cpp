@@ -1,6 +1,7 @@
 #include "ukf.h"
 #include "Eigen/Dense"
 #include <iostream>
+#include <fstream>
 
 using namespace std;
 using Eigen::MatrixXd;
@@ -11,6 +12,12 @@ using std::vector;
  * Initializes Unscented Kalman filter
  */
 UKF::UKF() {
+  // if this is true, the program will output files for NIS for laser and radar
+  write_NIS_ = true;
+
+  ///* if this is true, the program will print x_ and P_ to a file instead of screen
+  write_state_to_file_ = true;
+
   // if this is false, laser measurements will be ignored (except during init)
   use_laser_ = true;
 
@@ -41,14 +48,6 @@ UKF::UKF() {
   // initial state vector
   x_ = VectorXd(5);
 
-  /**
-  TODO:
-
-  Complete the initialization. See ukf.h for other member properties.
-
-  Hint: one or more values initialized above might be wildly off...
-  */
-
   is_initialized_ = false;
 
   time_us_ = 0;
@@ -77,7 +76,6 @@ UKF::UKF() {
   P_ = MatrixXd::Identity(5, 5);
 
   Xsig_pred_ = MatrixXd(n_x_, 2 * n_aug_ + 1);
-  //Xsig_pred_.fill(0.0);
 
   weights_ = VectorXd(2 * n_aug_ + 1);
 
@@ -139,8 +137,27 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
       time_us_ = meas_package.timestamp_ / 1000000.0;
     }
 
+    // clean NIS_radar.csv and NIS_laser.csv if write_NIS_ is true
+    if (write_NIS_ == true) {
+      std::fstream f;
+      f.open("../NIS_radar.csv", std::fstream::out | std::fstream::trunc);
+      f << "NIS radar" << std::endl;
+      f.close();
+
+      f.open("../NIS_laser.csv", std::fstream::out | std::fstream::trunc);
+      f << "NIS laser" << std::endl;
+      f.close();
+    }
+
+    // clean state_output.csv if write_state_to_file_ is true
+    if (write_state_to_file_ == true) {
+      std::fstream f;
+      f.open("../state_output.csv", std::fstream::out | std::fstream::trunc);
+      f.close();
+    }
+
     // done initializing, no need to predict or update
-    is_initialized_ = true;
+    is_initialized_ = true;  
     return;
   }
 
@@ -151,7 +168,6 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
   // compute the time elapsed between the current and previous measurements
   double dt = (meas_package.timestamp_ / 1000000.0 - time_us_);	//dt - expressed in microseconds
   time_us_ = meas_package.timestamp_  / 1000000.0;
-  //cout << "Timestamp :" << meas_package.timestamp_ << endl;
 
   // Predict our state
   Prediction(dt);
@@ -165,16 +181,30 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
     if (use_radar_ == true) UpdateRadar(meas_package.raw_measurements_);
   } else {
     // Laser updates
-    // Because this model is linear, we don't need to worry
-    // about loss of precision and can use the same
-    // method as in EKF.
-
     if (use_laser_ == true) UpdateLidar(meas_package.raw_measurements_);
   }
 
   // print the output
-  //cout << "x_ = " << x_ << endl;
-  //cout << "P_ = " << P_ << endl;
+  if (write_state_to_file_ == true) {
+    std::fstream f;
+    f.open("../state_output.csv", std::fstream::out | std::fstream::app);
+    f << "x_" << endl;
+    for (int j = 0; j < x_.rows(); j++) {
+      f << x_(j) << endl;
+    }
+    f << "P_" << endl;
+    for (int j = 0; j < P_.rows(); j++) {
+      for (int k = 0; k < P_.cols(); k++) {
+        f << P_(j, k) << ","; 
+      }
+      f << endl;
+    }
+    f.close();
+  }
+  else{
+  cout << "x_ = " << x_ << endl;
+  cout << "P_ = " << P_ << endl;
+  }
 }
 
 /**
@@ -196,25 +226,29 @@ void UKF::Prediction(double delta_t) {
  * @param {MeasurementPackage} meas_package
  */
 void UKF::UpdateLidar(const VectorXd &z) {
-  /**
-  TODO:
-
-  Complete this function! Use lidar data to update the belief about the object's
-  position. Modify the state vector, x_, and covariance, P_.
-
-  You'll also need to calculate the lidar NIS.
-  */
-  std::cout << "ENTERED UPDATE LIDAR " << std::endl;
+  // Because this model is linear, we don't need to worry
+  // about loss of precision and can use the same
+  // method as in EKF.
 
   VectorXd y_ = z - (H_laser_ * x_);
-  MatrixXd Ht = H_laser_.transpose();    // storing Ht matrix to improve speed
+  MatrixXd Ht = H_laser_.transpose();           // storing Ht matrix for efficiency
   MatrixXd S_ = H_laser_ * P_ * Ht + R_laser_;
-  MatrixXd K_ = P_ * Ht * S_.inverse();
+  MatrixXd Si = S_.inverse();                   // storing Si matrix for efficiency
+  MatrixXd K_ = P_ * Ht * Si;
 
   // New Estimate
   x_ = x_ + (K_ * y_);
   MatrixXd I_ = MatrixXd::Identity(x_.size(), x_.size());
   P_ = (I_ - K_ * H_laser_) * P_;
+
+  // NIS calculation
+  double NIS_laser_ = y_.transpose() * Si * y_;
+  if (write_NIS_ == true) {
+    std::fstream f;
+    f.open("../NIS_laser.csv", std::fstream::out | ios::app);
+    f << NIS_laser_ << std::endl;
+    f.close();
+  }
 }
 
 /**
@@ -222,19 +256,14 @@ void UKF::UpdateLidar(const VectorXd &z) {
  * @param {MeasurementPackage} meas_package
  */
 void UKF::UpdateRadar(const VectorXd &z) {
-  /**
-  TODO:
-  calculate the radar NIS.
-  */
-  std::cout << "ENTERED UPDATE RADAR " << std::endl;
 
-  //set measurement dimension, radar can measure r, phi, and r_dot
+  // set measurement dimension, radar can measure r, phi, and r_dot
   int n_z_ = 3;
 
-  //create matrix for sigma points in measurement space
+  // create matrix for sigma points in measurement space
   MatrixXd Zsig_ = MatrixXd(n_z_, 2 * n_aug_ + 1);
 
-  //transform sigma points into measurement space
+  // transform sigma points into measurement space
   // iterate through all sigma points
   for (int i = 0; i < 2 * n_aug_ + 1; i++) {
     // store variables for easy understanding of formulas
@@ -258,8 +287,6 @@ void UKF::UpdateRadar(const VectorXd &z) {
 
   }
 
-  //std::cout << "CHEKPOINT 1 - FIRST FOR LOOP \n\n" << Zsig_ << std::endl;
-
   //calculate mean predicted measurement
   VectorXd z_pred_ = VectorXd(n_z_);
   z_pred_ = Zsig_ * weights_;
@@ -280,8 +307,6 @@ void UKF::UpdateRadar(const VectorXd &z) {
       //std::cout << "Angle after norm1: " << Z_diff_(1, i) << endl;
     }
    }
-
-  //std::cout << "CHEKPOINT 2 - SECOND FOR LOOP" << std::endl;
 
   // vectorized calculation of covariance matrix S
   MatrixXd S_ = MatrixXd(n_z_, n_z_);
@@ -320,11 +345,18 @@ void UKF::UpdateRadar(const VectorXd &z) {
   //update state mean and covariance matrix
   x_ += K_ * z_diff_;
   P_ -= K_ * S_ * K_.transpose();
+
+  // NIS calculation
+  double NIS_radar_ = z_diff_.transpose() * S_.inverse() * z_diff_;
+  if (write_NIS_ == true) {
+    std::fstream f;
+    f.open("../NIS_radar.csv", std::fstream::out | ios::app);
+    f << NIS_radar_ << std::endl;
+    f.close();
+  }
 }
 
 void UKF::PredictSigmaPoints(double delta_t) {
-  //std::cout << "Delta t :" << delta_t << std::endl;
-
   // Create a matrix for the augmented sigma points
   MatrixXd Xsig_aug_ = MatrixXd(n_aug_, 2 * n_aug_ + 1);
 

@@ -82,6 +82,12 @@ public:
   ///* radar covariance matrix
   MatrixXd R_radar_;
 
+  ///* if this is true, the program will output files for NIS for laser and radar
+  bool write_NIS_;
+
+  ///* if this is true, the program will print x_ and P_ to a file instead of screen
+  bool write_state_to_file_;
+
   /**
    * Constructor
    */
