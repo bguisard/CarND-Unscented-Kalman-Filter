@@ -67,6 +67,20 @@ public:
   ///* Sigma point spreading parameter
   double lambda_;
 
+  ///* intermediate matrix used to calc state covariance
+  MatrixXd X_diff_;
+
+  ///* intermediate matrix used to calc state cross covariance
+  MatrixXd Z_diff_;
+
+  ///* laser covariance matrix
+  MatrixXd R_laser_;
+
+  ///* laser measurement matrix
+  MatrixXd H_laser_;
+
+  ///* radar covariance matrix
+  MatrixXd R_radar_;
 
   /**
    * Constructor
@@ -95,13 +109,31 @@ public:
    * Updates the state and the state covariance matrix using a laser measurement
    * @param meas_package The measurement at k+1
    */
-  void UpdateLidar(MeasurementPackage meas_package);
+  void UpdateLidar(const VectorXd &z);
 
   /**
    * Updates the state and the state covariance matrix using a radar measurement
    * @param meas_package The measurement at k+1
    */
-  void UpdateRadar(MeasurementPackage meas_package);
+  void UpdateRadar(const VectorXd &z);
+
+  /**
+   * ADD DESCRIPTION LATER
+   * @param DESCRIBE PARAMETERS
+   */
+  void GenerateAugmentedSigmaPoints(MatrixXd* Xsig_aug_);
+
+  /**
+   * ADD DESCRIPTION LATER
+   * @param DESCRIBE PARAMETERS
+   */
+  void PredictSigmaPoints(double delta_t);
+
+  /**
+   * ADD DESCRIPTION LATER
+   * @param DESCRIBE PARAMETERS
+   */
+  void PredictMeanAndCovariance();
 };
 
 #endif /* UKF_H */
