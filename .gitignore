@@ -24,5 +24,4 @@ ide_profiles/xcode/Debug/
 ide_profiles/xcode/ExtendedKF.build/
 
 *.csv
-*.ipynb
 *.bak
