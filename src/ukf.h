@@ -76,9 +76,6 @@ public:
   ///* laser covariance matrix
   MatrixXd R_laser_;
 
-  ///* laser measurement matrix
-  MatrixXd H_laser_;
-
   ///* radar covariance matrix
   MatrixXd R_radar_;
 
@@ -87,6 +84,11 @@ public:
 
   ///* if this is true, the program will print x_ and P_ to a file instead of screen
   bool write_state_to_file_;
+
+  int k_iteration;
+
+  ///* if this is true, the program will print debugging outputs to a file
+  bool write_debug_file_;
 
   /**
    * Constructor
@@ -123,23 +125,28 @@ public:
    */
   void UpdateRadar(const VectorXd &z);
 
-  /**
-   * ADD DESCRIPTION LATER
-   * @param DESCRIBE PARAMETERS
-   */
+/**
+ * Generates matrix of augmented Sigma points
+ * @param (pointer to Xsig_aug)
+ */
   void GenerateAugmentedSigmaPoints(MatrixXd* Xsig_aug_);
 
-  /**
-   * ADD DESCRIPTION LATER
-   * @param DESCRIBE PARAMETERS
-   */
+/**
+ * Predicts Augmented Sigma points for a given delta_t
+ * @param delta_t
+ */
   void PredictSigmaPoints(double delta_t);
 
-  /**
-   * ADD DESCRIPTION LATER
-   * @param DESCRIBE PARAMETERS
-   */
+/**
+ * Predicts State Mean and Covariance
+ */
   void PredictMeanAndCovariance();
+
+/**
+ * Normalizes angles between -PI and +PI
+ * @param (double angle)
+ */
+  double NormalizeAngle(double angle);
 };
 
 #endif /* UKF_H */

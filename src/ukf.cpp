@@ -12,8 +12,11 @@ using std::vector;
  * Initializes Unscented Kalman filter
  */
 UKF::UKF() {
+  // if this is true, the program will output debug files
+  write_debug_file_ = false;
+
   // if this is true, the program will output files for NIS for laser and radar
-  write_NIS_ = true;
+  write_NIS_ = false;
 
   ///* if this is true, the program will print x_ and P_ to a file instead of screen
   write_state_to_file_ = true;
@@ -25,10 +28,10 @@ UKF::UKF() {
   use_radar_ = true;
 
   // Process noise standard deviation longitudinal acceleration in m/s^2
-  std_a_ = 0.2; // copied from last project for now
+  std_a_ = 2;
 
   // Process noise standard deviation yaw acceleration in rad/s^2
-  std_yawdd_ = 0.2; // copied from last project for now
+  std_yawdd_ = 1.5;
 
   // Laser measurement noise standard deviation position1 in m
   std_laspx_ = 0.15;
@@ -46,7 +49,7 @@ UKF::UKF() {
   std_radrd_ = 0.3;
 
   // initial state vector
-  x_ = VectorXd(5);
+  x_ = VectorXd::Zero(5);
 
   is_initialized_ = false;
 
@@ -58,14 +61,10 @@ UKF::UKF() {
 
   lambda_ = 3 - n_aug_;
 
-  // initializing R and H matrices for Laser and Radar
+  // initializing R matrices for Laser and Radar
   R_laser_ = MatrixXd(2, 2);
   R_laser_ << std_laspx_ * std_laspx_, 0,
               0, std_laspy_ * std_laspy_;
-
-  H_laser_ = MatrixXd(2, 5);
-  H_laser_ << 1, 0, 0, 0, 0,
-              0, 1, 0, 0, 0;
 
   R_radar_ = MatrixXd(3, 3);
   R_radar_ << std_radr_ * std_radr_, 0, 0,
@@ -73,9 +72,9 @@ UKF::UKF() {
               0, 0, std_radrd_ * std_radrd_;
 
   // initial state covariance matrix P
-  P_ = MatrixXd::Identity(5, 5);
+  P_ = MatrixXd::Identity(5, 5) * 0.15;
 
-  Xsig_pred_ = MatrixXd(n_x_, 2 * n_aug_ + 1);
+  Xsig_pred_ = MatrixXd::Zero(n_x_, 2 * n_aug_ + 1);
 
   weights_ = VectorXd(2 * n_aug_ + 1);
 
@@ -87,6 +86,8 @@ UKF::UKF() {
   weights_.fill(1 / (2 * (lambda_ + n_aug_)));
   weights_(0) = lambda_ / (lambda_ + n_aug_);
 
+  // counter of timesteps
+  k_iteration = 0;
 }
 
 UKF::~UKF() {}
@@ -107,6 +108,9 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
     // first measurement
     cout << "UKF: " << endl;
 
+    // timestep counting
+    k_iteration = 0;
+
     if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
 
       // raw measurements from RADAR (range (rho), bearing (phi) and range rate (rhodot))
@@ -116,12 +120,12 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
       std::cout << "Initializing with Radar" << std::endl;
       x_ << std::cos(meas_package.raw_measurements_[1]) * meas_package.raw_measurements_[0],
             std::sin(meas_package.raw_measurements_[1]) * meas_package.raw_measurements_[0],
-            0,
-            0,
-            0;
+            0.0001,
+            0.0001,
+            0.0001;
 
       // store previous timestamp value in (microseconds - us)
-      time_us_ = meas_package.timestamp_ / 1000000.0;
+      time_us_ = meas_package.timestamp_;
     }
     else if (meas_package.sensor_type_ == MeasurementPackage::LASER) {
 
@@ -129,30 +133,49 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
       std::cout << "Initializing with LIDAR" << std::endl;
       x_ << meas_package.raw_measurements_[0],
             meas_package.raw_measurements_[1],
-            0,
-            0,
-            0;
+            0.0001,
+            0.0001,
+            0.0001;
 
       // store previous timestamp value in (microseconds - us)
-      time_us_ = meas_package.timestamp_ / 1000000.0;
+      time_us_ = meas_package.timestamp_;
     }
 
     // clean NIS_radar.csv and NIS_laser.csv if write_NIS_ is true
-    if (write_NIS_ == true) {
+    if (write_NIS_) {
       std::fstream f;
-      f.open("../NIS_radar.csv", std::fstream::out | std::fstream::trunc);
-      f << "NIS radar" << std::endl;
-      f.close();
 
-      f.open("../NIS_laser.csv", std::fstream::out | std::fstream::trunc);
-      f << "NIS laser" << std::endl;
-      f.close();
+      if (use_radar_) {
+        f.open("../NIS_radar.csv", std::fstream::out | std::fstream::trunc);
+        f << "NIS radar" << std::endl;
+        f.close();
+      }
+
+      if (use_laser_) {
+        f.open("../NIS_laser.csv", std::fstream::out | std::fstream::trunc);
+        f << "NIS laser" << std::endl;
+        f.close();
+      }
+
     }
 
     // clean state_output.csv if write_state_to_file_ is true
-    if (write_state_to_file_ == true) {
+    if (write_state_to_file_) {
       std::fstream f;
       f.open("../state_output.csv", std::fstream::out | std::fstream::trunc);
+      f.close();
+    }
+
+    // clean and start debug.csv if write_debug_file_ is true
+    if (write_debug_file_) {
+      std::fstream f;
+      f.open("../debug.csv", std::fstream::out | std::fstream::trunc);
+
+      f << "Initialization" <<endl;
+      f << "\nx_," << k_iteration << endl << x_ << endl;
+      f << "\nP_," << k_iteration << endl << P_ << endl;
+      f << "\nweights_," << k_iteration << endl << weights_ << endl;
+
       f.close();
     }
 
@@ -165,12 +188,24 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
    *  Prediction                                                               *
    *****************************************************************************/
 
-  // compute the time elapsed between the current and previous measurements
-  double dt = (meas_package.timestamp_ / 1000000.0 - time_us_);	//dt - expressed in microseconds
-  time_us_ = meas_package.timestamp_  / 1000000.0;
+  if ((meas_package.sensor_type_ == MeasurementPackage::RADAR && use_radar_) ||
+      (meas_package.sensor_type_ == MeasurementPackage::LASER && use_laser_)) {
 
-  // Predict our state
-  Prediction(dt);
+    // compute the time elapsed between the current and previous measurements
+    double dt = (meas_package.timestamp_ - time_us_) / 1000000.0;	//dt - expressed in microseconds
+    time_us_ = meas_package.timestamp_;
+
+    // Predict our state
+    Prediction(dt);
+
+    if (write_debug_file_) {
+      std::fstream f;
+      f.open("../debug.csv", std::fstream::out | std::fstream::app);
+      f << "\nDelta t: " << dt << endl;
+      f.close();
+    }
+
+  }
 
   /*****************************************************************************
    *  Update                                                                   *
@@ -178,33 +213,51 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
 
   if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
     // Radar updates
-    if (use_radar_ == true) UpdateRadar(meas_package.raw_measurements_);
+    if (use_radar_) UpdateRadar(meas_package.raw_measurements_);
   } else {
     // Laser updates
-    if (use_laser_ == true) UpdateLidar(meas_package.raw_measurements_);
+    if (use_laser_) UpdateLidar(meas_package.raw_measurements_);
   }
 
+  /*****************************************************************************
+   *  Output                                                                   *
+   *****************************************************************************/
+
+  // count last iteration
+  k_iteration++;
+
   // print the output
-  if (write_state_to_file_ == true) {
+  if (write_state_to_file_) {
     std::fstream f;
     f.open("../state_output.csv", std::fstream::out | std::fstream::app);
-    f << "x_" << endl;
+    f << "x_," << k_iteration;
     for (int j = 0; j < x_.rows(); j++) {
-      f << x_(j) << endl;
+      f << "," << x_(j);
     }
-    f << "P_" << endl;
+    f << endl;
+    f << "P_," << k_iteration;
     for (int j = 0; j < P_.rows(); j++) {
       for (int k = 0; k < P_.cols(); k++) {
-        f << P_(j, k) << ","; 
+        f << "," << P_(j, k); 
       }
-      f << endl;
     }
+    f << endl;
     f.close();
   }
   else{
   cout << "x_ = " << x_ << endl;
   cout << "P_ = " << P_ << endl;
   }
+
+  // debugging prints
+  if (write_debug_file_) {
+    std::fstream f;
+    f.open("../debug.csv", std::fstream::out | std::fstream::app);
+    f << "\nx_," << k_iteration << endl << x_ << endl;
+    f << "\nP_," << k_iteration << endl << P_ << endl; 
+    f.close();
+  }
+
 }
 
 /**
@@ -223,27 +276,90 @@ void UKF::Prediction(double delta_t) {
 
 /**
  * Updates the state and the state covariance matrix using a laser measurement.
- * @param {MeasurementPackage} meas_package
+ * @param {MeasurementPackage} meas_package.raw_measurements_
  */
 void UKF::UpdateLidar(const VectorXd &z) {
-  // Because this model is linear, we don't need to worry
-  // about loss of precision and can use the same
-  // method as in EKF.
 
-  VectorXd y_ = z - (H_laser_ * x_);
-  MatrixXd Ht = H_laser_.transpose();           // storing Ht matrix for efficiency
-  MatrixXd S_ = H_laser_ * P_ * Ht + R_laser_;
-  MatrixXd Si = S_.inverse();                   // storing Si matrix for efficiency
-  MatrixXd K_ = P_ * Ht * Si;
+  // set measurement dimension, laser can measure px and py
+  int n_z_ = 2;
 
-  // New Estimate
-  x_ = x_ + (K_ * y_);
-  MatrixXd I_ = MatrixXd::Identity(x_.size(), x_.size());
-  P_ = (I_ - K_ * H_laser_) * P_;
+  // create matrix for sigma points in measurement space
+  MatrixXd Zsig_ = MatrixXd::Zero(n_z_, 2 * n_aug_ + 1);
+
+  // transform sigma points into measurement space
+  // iterate through all sigma points
+  for (int i = 0; i < 2 * n_aug_ + 1; i++) {
+    // store variables for easy understanding of formulas
+    Zsig_(0, i)  = Xsig_pred_(0, i);
+    Zsig_(1, i)  = Xsig_pred_(1, i);
+  }
+
+  //calculate mean predicted measurement
+  VectorXd z_pred_ = VectorXd::Zero(n_z_);
+  z_pred_ = Zsig_ * weights_;
+
+  // create covariance matrix S
+  MatrixXd S_ = MatrixXd::Zero(n_z_, n_z_);
+
+  // create matrix for cross correlation Tc
+  MatrixXd Tc_ = MatrixXd::Zero(n_x_, n_z_);
+
+  for (int i = 0; i < 2 * n_aug_ + 1; i++) {
+
+    // residuals
+    VectorXd z_diff_ = Zsig_.col(i) - z_pred_;
+    z_diff_(1) = NormalizeAngle(z_diff_(1));
+
+    S_ += weights_(i) * z_diff_ * z_diff_.transpose();
+
+    // state diff
+    VectorXd x_diff_ = Xsig_pred_.col(i) - x_;
+    x_diff_(3) = NormalizeAngle(x_diff_(3));
+
+    Tc_ += weights_(i) * x_diff_ * z_diff_.transpose();
+  
+  }
+
+  // debugging prints
+  if (write_debug_file_) {
+    std::fstream f;
+    f.open("../debug.csv", std::fstream::out | std::fstream::app);
+    f << "\nDebugging steps for  UPDATE LASER.";
+    f << "\nz: " << z << endl;
+    f << "\nZsig_," << k_iteration << endl << Zsig_ << endl;
+    f << "\nz_pred_," << k_iteration << endl << z_pred_ << endl;
+    f << "\nS_," << k_iteration << endl << S_ << endl;
+    f << "\nTc_," << k_iteration << endl << Tc_ << endl;
+    f.close();
+  }
+
+  // add measurement noise covariance matrix
+  S_ += R_laser_;
+
+  // calculate Kalman gain K;
+  MatrixXd K_ = Tc_ * S_.inverse();
+
+  // store residual
+  VectorXd y_ = z - z_pred_;
+  //y_(1) = NormalizeAngle(y_(1));
+
+  // debugging prints
+  if (write_debug_file_) {
+    std::fstream f;
+    f.open("../debug.csv", std::fstream::out | std::fstream::app);
+    f << "\nS_ with noise," << k_iteration << endl << S_ << endl;
+    f << "\nK_," << k_iteration << endl << K_ << endl;
+    f << "\ny_," << k_iteration << endl << y_ << endl;
+    f.close();
+  }
+
+  //update state mean and covariance matrix
+  x_ += K_ * y_;
+  P_ -= K_ * S_ * K_.transpose();
 
   // NIS calculation
-  double NIS_laser_ = y_.transpose() * Si * y_;
-  if (write_NIS_ == true) {
+  double NIS_laser_ = y_.transpose() * S_.inverse() * y_;
+  if (write_NIS_) {
     std::fstream f;
     f.open("../NIS_laser.csv", std::fstream::out | ios::app);
     f << NIS_laser_ << std::endl;
@@ -253,7 +369,7 @@ void UKF::UpdateLidar(const VectorXd &z) {
 
 /**
  * Updates the state and the state covariance matrix using a radar measurement.
- * @param {MeasurementPackage} meas_package
+ * @param {MeasurementPackage} meas_package.raw_measurements_
  */
 void UKF::UpdateRadar(const VectorXd &z) {
 
@@ -261,17 +377,17 @@ void UKF::UpdateRadar(const VectorXd &z) {
   int n_z_ = 3;
 
   // create matrix for sigma points in measurement space
-  MatrixXd Zsig_ = MatrixXd(n_z_, 2 * n_aug_ + 1);
+  MatrixXd Zsig_ = MatrixXd::Zero(n_z_, 2 * n_aug_ + 1);
 
   // transform sigma points into measurement space
   // iterate through all sigma points
   for (int i = 0; i < 2 * n_aug_ + 1; i++) {
     // store variables for easy understanding of formulas
     // can be supressed to save space in production.
-    double px  = Xsig_pred_(0,i);
-    double py  = Xsig_pred_(1,i);
-    double v   = Xsig_pred_(2,i);
-    double phi = Xsig_pred_(3,i);
+    double px  = Xsig_pred_(0, i);
+    double py  = Xsig_pred_(1, i);
+    double v   = Xsig_pred_(2, i);
+    double phi = Xsig_pred_(3, i);
 
     // calculate vx and vy
     double vx = cos(phi) * v;
@@ -288,67 +404,70 @@ void UKF::UpdateRadar(const VectorXd &z) {
   }
 
   //calculate mean predicted measurement
-  VectorXd z_pred_ = VectorXd(n_z_);
+  VectorXd z_pred_ = VectorXd::Zero(n_z_);
   z_pred_ = Zsig_ * weights_;
 
-  //calculate measurement covariance matrix S
-  Z_diff_ = Zsig_.colwise() - z_pred_;
-
-  // Normalize angles on Z_diff
-  for (int i = 0; i < Z_diff_.cols(); i++) {
-    if (Z_diff_(1, i) >  M_PI) {
-      //std::cout << "Angle before norm1: " << Z_diff_(1, i) << endl;
-      Z_diff_(1, i) = (int(Z_diff_(1, i) - M_PI) % int(2. * M_PI) - M_PI);
-      //std::cout << "Angle after norm1: " << Z_diff_(1, i) << endl;
-    }
-    if (Z_diff_(1, i) < -M_PI) {
-      //std::cout << "Angle before norm1: " << Z_diff_(1, i) << endl;
-      Z_diff_(1, i) = (int(Z_diff_(1, i) + M_PI) % int(2. * M_PI) - M_PI);
-      //std::cout << "Angle after norm1: " << Z_diff_(1, i) << endl;
-    }
-   }
-
-  // vectorized calculation of covariance matrix S
-  MatrixXd S_ = MatrixXd(n_z_, n_z_);
-  S_ = (Z_diff_.array().rowwise() * weights_.transpose().array()).matrix() * Z_diff_.transpose();
-
-  // add measurement noise covariance matrix
-  S_ = S_ + R_radar_;
+  // covariance matrix S
+  MatrixXd S_ = MatrixXd::Zero(n_z_, n_z_);
 
   //create matrix for cross correlation Tc
-  MatrixXd Tc_ = MatrixXd(n_x_, n_z_);
+  MatrixXd Tc_ = MatrixXd::Zero(n_x_, n_z_);
+
+  for (int i = 0; i < 2 * n_aug_ + 1; i++) {
+    VectorXd z_diff_ = Zsig_.col(i) - z_pred_;
+    z_diff_(1) = NormalizeAngle(z_diff_(1));
+
+    S_ += weights_(i) * z_diff_ * z_diff_.transpose();
+
+    VectorXd x_diff_ = Xsig_pred_.col(i) - x_;
+    x_diff_(3) = NormalizeAngle(x_diff_(3));
 
   //calculate cross correlation matrix
-  // vectorized calculation of cross correlation matrix Tc
-  X_diff_ = Xsig_pred_.colwise() - x_;
-  Z_diff_ = Zsig_.colwise() - z_pred_;
-  Tc_ = (X_diff_.array().rowwise() * weights_.transpose().array()).matrix() * Z_diff_.transpose();
+    Tc_ += weights_(i) * x_diff_ * z_diff_.transpose();
+  }
+
+  // debugging prints
+  if (write_debug_file_) {
+    std::fstream f;
+    f.open("../debug.csv", std::fstream::out | std::fstream::app);
+    f << "\nDebugging steps for  UPDATE RADAR.";
+    f << "\nz: " << z << endl;
+    f << "\nZsig_," << k_iteration << endl << Zsig_ << endl;
+    f << "\nz_pred_," << k_iteration << endl << z_pred_ << endl;
+    f << "\nS_," << k_iteration << endl << S_ << endl;
+    f << "\nTc_," << k_iteration << endl << Tc_ << endl;
+    f.close();
+  }
+
+  // add measurement noise covariance matrix
+  S_ += R_radar_;
 
   // calculate Kalman gain K;
   MatrixXd K_ = Tc_ * S_.inverse();
 
   // store residual
-  VectorXd z_diff_ = z - z_pred_;
+  VectorXd y_ = z - z_pred_;
 
   // normalize angle
-  if (z_diff_(1) >  M_PI) {
-    //std::cout << "Angle before norm2: " << z_diff_(1) << endl;
-    z_diff_(1) = (int(z_diff_(1) - M_PI) % int(2. * M_PI) - M_PI);
-    //std::cout << "Angle after norm2: " << z_diff_(1) << endl;
-  }
-  if (z_diff_(1) < -M_PI) {
-    //std::cout << "Angle before norm2: " << z_diff_(1) << endl;
-    z_diff_(1) = (int(z_diff_(1) + M_PI) % int(2. * M_PI) - M_PI);
-    //std::cout << "Angle after norm2: " << Z_diff_(1) << endl;
+  y_(1) = NormalizeAngle(y_(1));
+
+  // debugging prints
+  if (write_debug_file_) {
+    std::fstream f;
+    f.open("../debug.csv", std::fstream::out | std::fstream::app);
+    f << "\nS_ with noise," << k_iteration << endl << S_ << endl;
+    f << "\nK_," << k_iteration << endl << K_ << endl;
+    f << "\ny_," << k_iteration << endl << y_ << endl;
+    f.close();
   }
 
   //update state mean and covariance matrix
-  x_ += K_ * z_diff_;
+  x_ += K_ * y_;
   P_ -= K_ * S_ * K_.transpose();
 
   // NIS calculation
-  double NIS_radar_ = z_diff_.transpose() * S_.inverse() * z_diff_;
-  if (write_NIS_ == true) {
+  double NIS_radar_ = y_.transpose() * S_.inverse() * y_;
+  if (write_NIS_) {
     std::fstream f;
     f.open("../NIS_radar.csv", std::fstream::out | ios::app);
     f << NIS_radar_ << std::endl;
@@ -356,9 +475,13 @@ void UKF::UpdateRadar(const VectorXd &z) {
   }
 }
 
+/**
+ * Predicts Augmented Sigma points for a given delta_t
+ * @param delta_t
+ */
 void UKF::PredictSigmaPoints(double delta_t) {
   // Create a matrix for the augmented sigma points
-  MatrixXd Xsig_aug_ = MatrixXd(n_aug_, 2 * n_aug_ + 1);
+  MatrixXd Xsig_aug_ = MatrixXd::Zero(n_aug_, 2 * n_aug_ + 1);
 
   // Call our augmented sigma points generator function
   GenerateAugmentedSigmaPoints(&Xsig_aug_);
@@ -366,66 +489,102 @@ void UKF::PredictSigmaPoints(double delta_t) {
   // store delta_t^2 to avoid multiple calcs
   double delta_t2 = delta_t * delta_t;
 
+  // debugging prints
+  if (write_debug_file_) {
+    std::fstream f;
+    f.open("../debug.csv", std::fstream::out | std::fstream::app);
+    f << "\nXsig_aug_: " << endl << Xsig_aug_ << endl;
+    f << "\n\nDebugging steps of PREDICT SIGMA POINTS." << endl;
+    f << "\nDelta t: " << delta_t << endl;
+    f << "\nDelta t2: " << delta_t2 << endl;
+    f.close();
+  }
+
   // iterate through columns
   for (int i = 0; i < 2 * n_aug_ + 1; i++) {
     // store variables for easy understanding of formulas
     // can be supressed to save space in production.
-    double px        = Xsig_aug_(0,i);
-    double py        = Xsig_aug_(1,i);
-    double v         = Xsig_aug_(2,i);
-    double phi       = Xsig_aug_(3,i);
-    double phi_d     = Xsig_aug_(4,i);
-    double nu_a      = Xsig_aug_(5,i);
-    double nu_phi_dd = Xsig_aug_(6,i);
+    double px        = Xsig_aug_(0, i);
+    double py        = Xsig_aug_(1, i);
+    double v         = Xsig_aug_(2, i);
+    double phi       = Xsig_aug_(3, i);
+    double phi_d     = Xsig_aug_(4, i);
+    double nu_a      = Xsig_aug_(5, i);
+    double nu_phi_dd = Xsig_aug_(6, i);
 
-    // declare new state variables
+    // declare new predicted state variables
     double px_p;
     double py_p;
 
     // These values below are specific for our CTRV model
     // (constant turn rate and velocity )
     double v_p = v;
-    double phi_p = phi + phi_d * delta_t;
+    double phi_p = (phi + (phi_d * delta_t));
     double phi_d_p = phi_d;
+
+    //phi_p = NormalizeAngle(phi_p);
 
     // if phi dot is not zero (we are using 1e-4 as zero here)
     if (fabs(phi_d) > 0.001) {
-      px_p = px + v / phi_d * (  sin(phi + phi_d * delta_t) - sin(phi));
-      py_p = py + v / phi_d * (- cos(phi + phi_d * delta_t) + cos(phi));
+      px_p = px + (v / phi_d) * (sin(phi_p) - sin(phi));
+      py_p = py + (v / phi_d) * (cos(phi) - cos(phi_p));
     } // if phi dot is zero we use the simplified version
     else {
-      px_p = px + v * delta_t * cos(phi);
-      py_p = py + v * delta_t * sin(phi);
+      px_p = px + (v * cos(phi) * delta_t);
+      py_p = py + (v * sin(phi) * delta_t);
     }
 
     //add noise
-    px_p = px_p + 0.5 * delta_t2 * cos(phi) * nu_a;
-    py_p = py_p + 0.5 * delta_t2 * sin(phi) * nu_a;
-    v_p = v_p + delta_t * nu_a;
-    phi_p = phi_p + 0.5 * delta_t2 * nu_phi_dd;
-    phi_d_p = phi_d_p + delta_t * nu_phi_dd;
+    px_p += 0.5 * (delta_t2 * cos(phi) * nu_a);
+    py_p += 0.5 * (delta_t2 * sin(phi) * nu_a);
+    v_p += (delta_t * nu_a);
+    phi_p += (0.5 * delta_t2 * nu_phi_dd);
+    phi_d_p += (delta_t * nu_phi_dd);
+
+    //phi_p = NormalizeAngle(phi_p);
 
     // pass calculated values to Xsig_pred
     Xsig_pred_.col(i) << px_p, py_p, v_p, phi_p, phi_d_p;
   }
+
+  // debugging prints
+  if (write_debug_file_) {
+    std::fstream f;
+    f.open("../debug.csv", std::fstream::out | std::fstream::app);
+    f << "\nXsig_pred_: " << endl << Xsig_pred_ << endl;
+    f.close();
+  }
 }
 
+/**
+ * Generates matrix of augmented Sigma points
+ * @param (pointer to Xsig_aug)
+ */
 void UKF::GenerateAugmentedSigmaPoints(MatrixXd* Xsig_aug_) {
   // Create augmented mean vector
   VectorXd x_aug_ = VectorXd(n_aug_);
-  x_aug_.head(n_x_) = x_;
-  x_aug_(n_x_)     = 0;
-  x_aug_(n_x_ + 1) = 0;
+  x_aug_.head(5) = x_;
+  x_aug_(5)     = 0;
+  x_aug_(6) = 0;
 
   // Create augmented state covariances
-  MatrixXd P_aug_ = MatrixXd(7, 7);
-  P_aug_.fill(0.0);
+  MatrixXd P_aug_ = MatrixXd::Zero(7, 7);
   P_aug_.topLeftCorner(5, 5) = P_;
   P_aug_(5, 5) = std_a_ * std_a_;
   P_aug_(6, 6) = std_yawdd_ * std_yawdd_;
 
   //create square root matrix
   MatrixXd A_aug_ = P_aug_.llt().matrixL();
+
+    // debugging prints
+  if (write_debug_file_) {
+    std::fstream f;
+    f.open("../debug.csv", std::fstream::out | std::fstream::app);
+    f << "\n\nDebugging steps of GENERATE AUGMENTED SIGMA POINTS." << endl;
+    f << "\nP_aug_: \n" << P_aug_ << endl;
+    f << "\nA_aug_: \n" << A_aug_ << endl;
+    f.close();
+  }
 
   // Create augmented sigma point matrix
   (*Xsig_aug_).col(0) = x_aug_;
@@ -436,31 +595,59 @@ void UKF::GenerateAugmentedSigmaPoints(MatrixXd* Xsig_aug_) {
   }
 }
 
-
+/**
+ * Predicts State Mean and Covariance
+ */
 void UKF::PredictMeanAndCovariance() {
 
   // predict state mean
   // we use vectorization instead of loops for efficiency
   x_ = Xsig_pred_ * weights_;
 
-  // predict state covariance matrix
-  // we use vectorization instead of loops for efficiency
-  X_diff_ = Xsig_pred_.colwise() - x_;
+  P_.fill(0.0);
+  for (int i = 0; i < 2 * n_aug_ + 1; i++) {  //iterate over sigma points
 
-  // now we iterate through the angles to normalize between -pi and +pi
-  for (int i = 0; i < X_diff_.cols(); i++) {
-    if (X_diff_(3, i) >  M_PI) {
-      //std::cout << "Angle before norm3: " << X_diff_(3, i) << endl;
-      X_diff_(3, i) = (int(X_diff_(3, i) - M_PI) % int(2. * M_PI) - M_PI);
-      //std::cout << "Angle after norm3: " << X_diff_(3, i) << endl;
+    // state difference
+    VectorXd x_diff = Xsig_pred_.col(i) - x_;
+    //angle normalization
+    x_diff(3) = NormalizeAngle(x_diff(3));
+
+    P_ = P_ + weights_(i) * x_diff * x_diff.transpose() ;
+  }
+
+    // debugging prints
+  if (write_debug_file_) {
+    std::fstream f;
+    f.open("../debug.csv", std::fstream::out | std::fstream::app);
+    f << "\n\nDebugging steps of PREDICT MEAN AND COVARIANCE." << endl;
+    f << "\nx_: \n" << x_ << endl;
+    f << "\nP_: \n" << P_ << endl;
+    f.close();
+  }
+
+}
+
+/**
+ * Normalizes angles between -PI and +PI
+ * @param (double angle)
+ */
+double UKF::NormalizeAngle(double angle) {
+  double n_angle;
+
+  if (fabs(angle) > M_PI) {
+    n_angle = angle - round(angle / (2.0d * M_PI)) * (2.0d * M_PI);
+
+    // debugging prints
+    if (write_debug_file_) {
+      std::fstream f;
+      f.open("../debug.csv", std::fstream::out | std::fstream::app);
+      f << "\nAngle before normalizing: " << angle << endl;
+      f << "\nAngle after normalizing: " << n_angle << endl;
+      f.close();
     }
-    if (X_diff_(3, i) < -M_PI) {
-      //std::cout << "Angle before norm3: " << X_diff_(3, i) << endl;
-      X_diff_(3, i) = (int(X_diff_(3, i) + M_PI) % int(2. * M_PI) - M_PI);
-      //std::cout << "Angle after norm3: " << X_diff_(3, i) << endl;
-    }
-   }
+  } else {
+    return angle;
+  }
 
-  P_ = (X_diff_.array().rowwise() * weights_.transpose().array()).matrix() * X_diff_.transpose();
-
+  return n_angle;
 }
